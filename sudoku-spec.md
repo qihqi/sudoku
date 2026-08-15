@@ -1,20 +1,28 @@
 # Sudoku: Intent-Level IR for Neural Software Synthesis
 
-Status: draft specification. The canonical language name is `Sudoku`.
 
 ## 1. Purpose
 
-Sudoku is a concise, human-authored, intent-level intermediate representation for software. An LLM consumes Sudoku
+Sudoku is a concise, human-authored, intent-level "non-exact" language for software. An LLM consumes Sudoku
 and proposes a conventional implementation. Sudoku describes required structure and behavior while leaving incidental
 implementation details open.
+
+Sudoku is meant to be transpiled to other language by LLM alone, just like transpiling Python to Rust with LLMs. 
 
 Sudoku supports two transformations:
 
 1. **Code to Sudoku:** analyze a source project and produce a folder of Sudoku specifications.
 2. **Sudoku to code:** consume a Sudoku folder and produce a project in one selected target language.
 
-Initial code-generation targets are Python and Rust. Each generation run produces one target language, not both. The
-format must remain open to future targets and must not encode Python or Rust as its semantic model.
+Overall intuition:
+* LLMs are effective in transpiling one programming language to another (say Python to Rust), because
+  code written in a programming language is very detailed and complete as a spec.
+* Regular prompts are not as detailed. -- the text input box in a coding harness does not allow extensive formatted
+  writting.
+* Sudoku aims to be a middle ground: More control and exact than Python, but still declarative using mostly English. 
+* Naming: Like the number puzzle sudoku, we only need to spell out what is needed, LLM should infer the rest. Like
+  we draw few dots in the design space, and LLM connects the dots to the full picture. Also sudoku sounds like "pseudocode".
+
 
 ## 2. Implementation model
 
@@ -37,66 +45,54 @@ Example:
 spec/foo/bar/content.sudoku  ->  src/foo/bar/<generated modules>
 ```
 
-The filename does not determine a generated filename. One Sudoku file may declare one or many modules, so files map
-one-to-many to target files. A file containing one module may happen to produce one target file.
+The filename does not always determine a generated filename. One Sudoku file may declare one or many modules, so files map
+one-to-many to target files. A file containing one module may happen to produce one target file. A file that did not 
+declare a module are treated as one module, and thus produce one file.
 
 `.sudoku` is the conventional extension, not a recognition rule. `.md`, `.txt`, or another text file in the project
 must be accepted when its contents follow this specification. Agents identify Sudoku from content and project context.
 
+The way for soduku file to declare more modules in a file is through a markdown heading
+
+```
+# module <name of module>
+```
+
+OR
+
+```
+module <name of module>
+=======================
+```
+
+etc. the rules for a module are: 1. top level header, and 2 have `module` keyword
+
+
 ## 4. Declaration structure
 
-Markdown-style headings declare program constructs. Heading depth expresses semantic nesting. A heading's scope ends
-at the next declaration heading of equal or lesser depth.
+Inside of soduku file there will be general Englishd descriptions of what is expected the file / module to do.
+It can contain python stype class / functions:
 
-A level-one declaration must be a module. A file may contain multiple level-one modules. Core declaration forms are:
+Such as:
 
-```sudoku
-# module tasks:
-## class Task:
-### def complete:
-## def create_task:
-## module serialization:
-### def encode:
+```
+class Name:
+  ...English
+
+  def foo(self):
+  ... English
+
 ```
 
-The trailing-colon form is canonical and must be emitted by Sudoku-producing agents. Readers must also accept a colon
-immediately after the construct keyword:
+A class can choose to declare key fields with Python syntax with Python style type annotations.
 
-```sudoku
-# module: tasks
-## class: Task
-## def: create_task
-```
+fields and methods declared in class are not exhaustive, meaning that the generated code can contain more
+fields and methods than declared to accomplish the description in English.
 
-This dual form applies to every declaration kind. Generic document headings such as `Overview` must not be used.
 Explanatory content belongs to a declaration and is introduced by a semantic clause such as `intent:` or `requires:`.
 
 Other clearly named program constructs may be used when needed, but agents should prefer the small core vocabulary and
 must ask when a construct has multiple plausible meanings.
-
-## 5. Module-to-target mapping
-
-Each declared module maps to the selected target language's native module or package representation. Module names and
-nesting are required public structure; target-specific filenames are consequences of that structure.
-
-For Python, a leaf module normally maps to a `.py` file. A module containing nested modules becomes a package. Its own
-content maps to `__init__.py`, and each nested module maps beneath that package.
-
-```sudoku
-# module parent:
-## def root_function:
-## module child:
-### def child_function:
-```
-
-```text
-parent/
-  __init__.py       # root_function
-  child.py          # child_function
-```
-
-Other targets must use their closest native equivalent. The mapping must preserve semantic module identity even when
-the target's filesystem conventions differ from Python's.
 
 ## 6. Required and open interface structure
 
@@ -152,7 +148,7 @@ Example:
     allow:
         Choose any storage engine appropriate for the selected target.
 
-## def complete_task:
+  def complete_task:
     requires:
         The referenced task exists.
 
@@ -175,7 +171,7 @@ Behavioral pseudocode is normative about its described behavior, not its textual
 different algorithm or control-flow construct if all observable behavior and constraints are preserved.
 
 ```sudoku
-## def complete_task:
+  def complete_task:
     behavior:
         if task.status == completed:
             return task
@@ -194,7 +190,7 @@ State-machine bodies may be used whenever behavior depends on history or allowed
 valid when states, transitions, guards, effects, and forbidden transitions remain clear.
 
 ```sudoku
-## class Task:
+  class Task:
     state_machine:
         initial: open
 
@@ -253,35 +249,15 @@ verify:
 
 Verification describes what must be checked; it does not prescribe the testing framework or assertion placement.
 
-## 12. Specification-level control flow
+## 12. Local extension
 
-Python-like control flow may contain Sudoku declarations. In this role it is metaprogramming over the specification,
-not required runtime control flow. It expresses families of declarations without listing each one.
+In the begining sudoku file, there can have a `# NEW Syntax` section. 
+Inside this section, one can describe conventions an syntax for sudoku to be used inside of this one file
+new syntax section can "import" syntaxes of other files and is treated as if it is part of spec of this file.
 
-A selector may be concise English enclosed in brackets. It may range over symbols and properties in the Sudoku project.
-No rigid query grammar is required.
+New syntaxes are treated as part of sudoku spec while processing said sudoku file, as same level as this spec.
 
-```sudoku
-# module bindings:
-    for x in [every public function in `source_api`]:
-        ## def $(x)_bind:
-            requirements:
-                Provide the Python binding for `$(x)`.
-```
-
-The loop conceptually adds one required declaration for each selected function. The implementation agent need not emit
-or store an expanded Sudoku file.
-
-Metavariable substitution uses `$(name)`. Parentheses are required, especially when composing identifiers:
-
-```text
-$(x)_bind       # value of x followed by the literal suffix _bind
-```
-
-`$x_bind` is not valid substitution because it is ambiguous between variables named `x` and `x_bind`.
-
-English-like conditional metaprogramming is also allowed when its selection rule and resulting declarations are clear.
-An agent must ask if it cannot determine the selected symbol set with confidence.
+Importing other sudoku file can use relative path from this file or relative path from project root.
 
 ## 13. Symbol references
 
@@ -313,6 +289,7 @@ A code-to-Sudoku agent must:
 6. omit incidental helpers when a higher-level requirement fully explains them;
 7. qualify cross-project symbol references when short names are ambiguous; and
 8. ask rather than invent when code and context do not reveal the intended semantics.
+9. Do it module per module, so that keeps your context window with most relevant information only.
 
 The result is a semantic specification, not a line-by-line transliteration or a promise of byte-identical regeneration.
 
@@ -330,6 +307,7 @@ A Sudoku-to-code agent must:
 8. apply compatible suggestions, including target-specific recommendations, when useful;
 9. generate assertions or tests for every `verify:` item; and
 10. report unresolved requirements, unverified obligations, and material implementation assumptions.
+11. Do it file per file. Only keep what is needed in your context window.
 
 The generator may make ordinary implementation choices left open by the specification. It must not turn missing product
 behavior into an unreported assumption when that choice could materially change the result.
